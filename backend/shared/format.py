@@ -11,7 +11,7 @@ Layout:
   [NB]  gzip-compressed metadata
   [4B]  Number of chunks
   per chunk:
-    [1B]  Codec: 0=jpeg2000, 1=zstd
+    [1B]  Codec: 0=jpeg2000, 1=zstd (zstd kept for backwards compat)
     [4B]  Chunk length
     [NB]  Compressed frame bytes
 """

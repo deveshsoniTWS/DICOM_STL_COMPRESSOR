@@ -9,7 +9,7 @@ import io
 import numpy as np
 import pydicom
 from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
-from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+from pydicom.uid import UID, ExplicitVRLittleEndian, generate_uid
 
 from shared.format import unpack
 from shared.metadata import decompress_meta
@@ -22,16 +22,16 @@ def decompress(data: bytes) -> tuple[bytes, dict]:
     Decompress a .medzip file back to a proper .dcm file.
 
     Returns:
-        (dcm_bytes, metadata_dict)
+        (dcm_bytes, internal_dict)
     """
     mode, fmt, meta_compressed, chunks = unpack(data)
 
     if fmt != "dicom":
         raise ValueError(f"Expected dicom format, got: {fmt}")
 
-    meta_dict = decompress_meta(meta_compressed)
-    shape = tuple(int(x) for x in meta_dict.get("_shape", []))
-    dtype: str = meta_dict.get("_dtype", "uint8")
+    meta_ds, internal = decompress_meta(meta_compressed)
+    shape = tuple(int(x) for x in internal.get("_shape", []))
+    dtype: str = internal.get("_dtype", "uint8")
     is_multiframe = len(shape) == 3
 
     if is_multiframe:
@@ -41,68 +41,29 @@ def decompress(data: bytes) -> tuple[bytes, dict]:
         codec, chunk_data = chunks[0]
         pixel_array = decompress_frame(codec, chunk_data, mode, shape, dtype)
 
-    dcm_bytes = _rebuild_dicom(pixel_array, meta_dict)
-    return dcm_bytes, meta_dict
+    dcm_bytes = _rebuild_dicom(pixel_array, meta_ds)
+    return dcm_bytes, internal
 
 
-# ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-# Tags we safely restore — only ones with predictable string representation
-_SAFE_TAGS = {
-    "PatientName",
-    "PatientID",
-    "PatientBirthDate",
-    "PatientSex",
-    "StudyDate",
-    "StudyTime",
-    "StudyDescription",
-    "StudyInstanceUID",
-    "SeriesInstanceUID",
-    "SOPInstanceUID",
-    "SOPClassUID",
-    "Modality",
-    "InstitutionName",
-    "Manufacturer",
-    "PhotometricInterpretation",
-    "WindowCenter",
-    "WindowWidth",
-    "RescaleIntercept",
-    "RescaleSlope",
-    "ImageType",
-}
-
-
-def _rebuild_dicom(pixel_array: np.ndarray, meta_dict: dict) -> bytes:
-    """Reconstruct a valid .dcm file from pixel array + metadata dict."""
-
-    # ── File meta ─────────────────────────────────────────────────────────────
+def _rebuild_dicom(pixel_array: np.ndarray, meta_ds: pydicom.Dataset) -> bytes:
+    """Reconstruct a valid .dcm file from pixel array + original Dataset."""
     file_meta = FileMetaDataset()
-    file_meta.MediaStorageSOPClassUID = meta_dict.get(
-        "SOPClassUID", "1.2.840.10008.5.1.4.1.1.2"
+    file_meta.MediaStorageSOPClassUID = UID(
+        getattr(meta_ds, "SOPClassUID", "1.2.840.10008.5.1.4.1.1.2")
     )
-    file_meta.MediaStorageSOPInstanceUID = meta_dict.get(
-        "SOPInstanceUID", generate_uid()
+    file_meta.MediaStorageSOPInstanceUID = UID(
+        getattr(meta_ds, "SOPInstanceUID", generate_uid())
     )
     file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-    file_meta.ImplementationClassUID = generate_uid()
+    file_meta.ImplementationClassUID = UID(generate_uid())
 
-    # ── Dataset ───────────────────────────────────────────────────────────────
     ds = FileDataset(
         filename_or_obj="",
-        dataset=Dataset(),
+        dataset=meta_ds,
         file_meta=file_meta,
-        preamble=b"\x00" * 128,  # required 128-byte preamble
+        preamble=b"\x00" * 128,
     )
 
-    # Restore only safe string tags — avoids VR type mismatch warnings
-    for tag in _SAFE_TAGS:
-        if tag in meta_dict and tag not in ("_shape", "_mode", "_dtype", "_file_meta"):
-            try:
-                setattr(ds, tag, meta_dict[tag])
-            except Exception:
-                pass
-
-    # ── Pixel tags — set explicitly with correct types ────────────────────────
     if pixel_array.ndim == 3:
         ds.NumberOfFrames = pixel_array.shape[0]
         ds.Rows = pixel_array.shape[1]
@@ -121,7 +82,6 @@ def _rebuild_dicom(pixel_array: np.ndarray, meta_dict: dict) -> bytes:
     if not hasattr(ds, "PhotometricInterpretation"):
         ds.PhotometricInterpretation = "MONOCHROME2"
 
-    # ── Write ─────────────────────────────────────────────────────────────────
     buf = io.BytesIO()
     pydicom.dcmwrite(buf, ds, write_like_original=False)
     return buf.getvalue()

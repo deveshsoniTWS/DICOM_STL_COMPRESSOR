@@ -17,10 +17,6 @@ def compress(file_path: str, fmt: str, mode: str) -> tuple[bytes, dict]:
 
 
 def decompress(data: bytes, fmt: str) -> tuple[bytes, dict]:
-    """
-    Returns:
-        (reconstructed_file_bytes, metadata_dict)
-    """
     if fmt == "dicom":
         return dicom_decompress(data)
     raise ValueError(f"Unsupported format: {fmt}")

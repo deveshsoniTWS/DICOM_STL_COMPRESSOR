@@ -16,6 +16,16 @@ def _compress_task(args: tuple) -> tuple[str, bytes]:
 
 
 def compress_frames(pixel_array: np.ndarray, mode: str) -> list[tuple[str, bytes]]:
+    """
+    Compress all frames in parallel.
+
+    Args:
+        pixel_array: (N, H, W) numpy array
+        mode: 'lossless' or 'lossy'
+
+    Returns:
+        List of (codec, bytes) tuples, one per frame
+    """
     n_frames = pixel_array.shape[0]
     tasks = [(pixel_array[i], mode) for i in range(n_frames)]
     workers = min(n_frames, 4)
@@ -32,6 +42,18 @@ def decompress_frames(
     frame_shape: tuple,
     dtype: str,
 ) -> np.ndarray:
+    """
+    Decompress all frames back to 3D array.
+
+    Args:
+        chunks:      list of (codec, bytes) tuples
+        mode:        'lossless' or 'lossy'
+        frame_shape: (H, W)
+        dtype:       original numpy dtype string
+
+    Returns:
+        (N, H, W) numpy array
+    """
     frames = [
         decompress_frame(codec, data, mode, frame_shape, dtype)
         for codec, data in chunks

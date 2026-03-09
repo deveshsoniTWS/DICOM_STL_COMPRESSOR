@@ -28,12 +28,14 @@ def compress(dicom_path: str, mode: str) -> tuple[bytes, dict]:
     ds = pydicom.dcmread(dicom_path)
     pixel_array = ds.pixel_array
 
-    # 2. Metadata
-    meta_dict = extract(ds)
-    meta_dict["_shape"] = list(pixel_array.shape)
-    meta_dict["_mode"] = mode
-    meta_dict["_dtype"] = str(pixel_array.dtype)
-    meta_compressed = compress_meta(meta_dict)
+    # 2. Metadata — serialize with pydicom binary, preserves VR types
+    meta_ds = extract(ds)
+    meta_compressed = compress_meta(
+        meta_ds,
+        pixel_shape=list(pixel_array.shape),
+        mode=mode,
+        dtype=str(pixel_array.dtype),
+    )
 
     # 3. Pixels
     is_multiframe = pixel_array.ndim == 3
